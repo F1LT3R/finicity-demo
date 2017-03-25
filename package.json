@@ -1,14 +1,14 @@
 {
-  "name": "finicity",
+  "name": "finicity-demo",
   "private": true,
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Connect to multiple bank accounts using the Finicity API",
+  "main": "finicity.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "F1LT3R",
+  "license": "MIT",
   "dependencies": {
     "bluebird": "^3.5.0",
     "deep-extend": "^0.4.1",
