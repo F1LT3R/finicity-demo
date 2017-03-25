@@ -1,0 +1,19 @@
+{
+  "name": "finicity",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bluebird": "^3.5.0",
+    "deep-extend": "^0.4.1",
+    "jsonfile": "^2.4.0",
+    "needle": "^1.5.2",
+    "object-to-xml": "^1.1.0"
+  }
+}
