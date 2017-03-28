@@ -5,16 +5,26 @@
   "description": "Connect to multiple bank accounts using the Finicity API",
   "main": "finicity.js",
   "scripts": {
+    "start": "node ./finicity-demo.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "F1LT3R",
   "license": "MIT",
   "dependencies": {
     "bluebird": "^3.5.0",
+    "chalk": "^1.1.3",
+    "cli-table": "^0.3.1",
+    "commander": "^2.9.0",
     "deep-extend": "^0.4.1",
+    "enquirer": "^0.4.1",
+    "figlet": "^1.2.0",
+    "html": "^1.0.0",
     "jsonfile": "^2.4.0",
     "needle": "^1.5.2",
     "object-to-xml": "^1.1.0",
+    "prompt-list": "^0.1.2",
+    "prompt-password": "^0.1.1",
+    "prompt-question": "^0.4.1",
     "query-string": "^4.3.2"
   }
 }

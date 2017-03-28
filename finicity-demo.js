@@ -1,27 +1,53 @@
+const endpoints = {
+	authentication: '/aggregation/v2/partners/authentication',
+	getInstitutions: '/aggregation/v1/institutions',
+	getLoginForm: '/aggregation/v1/institutions/{id}/loginForm',
+	// addCustomer: '/aggregation/v1/customers/testing',
+	addCustomer: '/aggregation/v1/customers/active',
+	getCustomers: '/aggregation/v1/customers',
+	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall',
+}
+
 const institutionsToCache = [
 	'TD Bank',
 	'Vanguard',
 	'USAA',
-	'Health Equity',
+	'HealthEquity',
 	'Capitol One'
 ]
 
-const https = require('https')
+let host = 'http://127.0.0.1:3000'
 
+const https = require('https')
 const o2x = require('object-to-xml')
 const jsonfile = require('jsonfile')
 const Promise = require('bluebird')
 const deepExtend = require('deep-extend')
 const queryString = require('query-string')
+const commander = require('commander')
+const chalk = require('chalk')
+const html = require('html')
+const packageJson = require('./package.json')
+const Enquirer = require('enquirer')
+const Question = require('prompt-question')
+const PromptList = require('prompt-list')
+const PromptPassword = require('prompt-password')
+
+jsonfile.spaces = 4
+
+let debug = false
+
+const enquirer = new Enquirer()
+enquirer.register('list', require('prompt-list'))
+enquirer.register('password', require('prompt-password'))
+
+
 
 const POSTCHECK = process.argv[2] === 'POSTCHECK'
 
 const finicity_app_key = process.env.finicity_app_key
 const finicity_partner_id = process.env.finicity_partner_id
 const finicity_partner_secret = process.env.finicity_partner_secret
-
-let host = 'http://127.0.0.1:3000'
-// let host = 'http://127.0.0.1:3000'
 
 if (!finicity_app_key) {
 	console.error('Could not find your encironment variable "$finicity_app_key"')
@@ -31,12 +57,6 @@ if (!finicity_app_key) {
 
 if (!POSTCHECK) {
 	host = 'api.finicity.com'
-	// host = 'https://api.finicity.com'
-}
-
-const endpoints = {
-	authentication: '/aggregation/v2/partners/authentication',
-	getInstitutions: '/aggregation/v1/institutions'
 }
 
 const stateFile = 'WARNING_BANK_ACCESS_KEYS.json'
@@ -48,16 +68,25 @@ const has = (obj, ...lookups) => {
 		const nextStep = remainingSteps.shift()
 		const remainingStepCount = remainingSteps.length
 
-		if (remainingStepCount === 1 && !Reflect.has(pointer, nextStep)) {
-			return allTrue = false
+		if (nextStep === undefined && typeof pointer === type) {
+			return
 		}
+
+		if (remainingStepCount === 1 && !Reflect.has(pointer, nextStep)) {
+			allTrue = false
+			return
+		}
+
 		if (remainingStepCount === 0 && typeof pointer[nextStep] !== type) {
-			return allTrue = false
+			allTrue = false
+			return
+		} else {
+
 		}
 
 		pointer = pointer[nextStep]
 
-		if (remainingSteps.length > 0) {
+		if (remainingSteps.length >= 0) {
 			step(remainingSteps, pointer, type)
 		}
 	}
@@ -128,6 +157,18 @@ const timestampExpired = cachedTimestamp => {
 	return false
 }
 
+const oneDay = 1000 * 60 * 60 * 24
+const loginFormExpired = cachedTimestamp => {
+	const now = timeStamp()
+
+	if (now - cachedTimestamp > oneDay) {
+		return true
+	}
+
+	return false
+}
+
+
 // Makes POST/GET HTTPS Request and returns JavaScript Object
 const request = (options, postData) => new Promise((resolve, reject) => {
 	let responseBody = ''
@@ -141,6 +182,12 @@ const request = (options, postData) => new Promise((resolve, reject) => {
 	options.headers = deepExtend(defaultHeaders, options.headers)
 	options.host = host
 
+	if (debug) {
+		console.log(chalk.green((JSON.stringify(options))))
+	} else {
+		console.log(chalk.green(options.host + options.path))
+	}
+
 	const request = https.request(options, response => {
 		response.setEncoding('utf8');
 
@@ -149,8 +196,13 @@ const request = (options, postData) => new Promise((resolve, reject) => {
 		})
 
 		response.on('end', () => {
-			const data = JSON.parse(responseBody)
-			resolve(data)
+			try {
+				const data = JSON.parse(responseBody)
+				resolve(data)
+			} catch (err) {
+				console.log(chalk.red(html.prettyPrint(responseBody)))
+				return reject(err)
+			}
 		})
 
 		response.on('error', err => {
@@ -159,8 +211,9 @@ const request = (options, postData) => new Promise((resolve, reject) => {
 
 	})
 
-	if (postData)
-	request.write(postData)
+	if (postData) {
+		request.write(postData)
+	}
 
 	request.end()
 })
@@ -226,14 +279,11 @@ const authentication = () => new Promise((resolve, reject) => {
 	})
 })
 
-const getInstitutions = (currentState, searchText, start, limit) => new Promise((resolve, reject) => {
-	const query = queryString.stringify({
-		search: searchText.replace(/\s/g, '+'),
-		start,
-		limit
-	})
+const getInstitutions = (currentState, searchText, start, limit, cache) => new Promise((resolve, reject) => {
+	const search = searchText.replace(/\s/g, '+')
+	const query = `?search=${search}&start=${start}&limit=${limit}`
 
-	const path = `${endpoints.getInstitutions}?${query}`
+	const path = endpoints.getInstitutions + query
 
 	const headers = {
 		'Finicity-App-Token': currentState.accessToken.token,
@@ -246,25 +296,481 @@ const getInstitutions = (currentState, searchText, start, limit) => new Promise(
 
 	const postData = null
 
-	request(options, postData).then(resolve).catch(reject)
+	request(options, postData)
 	.then(response => {
-		console.log(response)
+		if (response.institutions.length === 0) {
+			console.log(`No insitutions found for search: "${searchText}".`)
+			return resolve(currentState)
+		}
+
+		console.log(`Found ${response.institutions.length} institutions for search: "${searchText}".`)
+
+		if (cache.toUpperCase() === "TRUE") {
+			const dataToSave = {
+				institutions: {}
+			}
+
+			response.institutions.forEach(institution => {
+				dataToSave.institutions[institution.id] = institution
+			})
+
+			return state.merge(dataToSave)
+			.then(currentState => {
+				console.log(`Cached ${response.institutions.length} institutions.`)
+				resolve(currentState)
+			})
+			.catch(err => {
+				reject(err)
+			})
+		}
+
+		resolve(response)
 	})
 	.catch(err => {
 		return reject(err)
 	})
 })
 
-state.load()
-.then(checkStateToken)
-// .then(authentication)
-.then(currentState => {
-	// console.log(234, currentState)
-	return getInstitutions(currentState, 'FinBank', 1, 10)
+const getLoginForm = (currentState, id, cache) => new Promise((resolve, reject) => {
+	const path = endpoints.getLoginForm.replace('{id}', id)
+
+	const headers = {
+		'Finicity-App-Token': currentState.accessToken.token,
+	}
+
+	var options = {
+		path,
+		headers
+	}
+
+	const postData = null
+
+	request(options, postData)
+	.then(response => {
+		const institutionName = chalk.yellow(currentState.institutions[id].name)
+		console.log(`Received login form for: ${institutionName}`)
+
+		if (cache) {
+			const dataToSave = {
+				institutions: {
+					[id]: {
+						login: {
+							loginForm: response.loginForm,
+							timestamp: timeStamp()
+						}
+					}
+				}
+			}
+
+			return state.merge(dataToSave)
+			.then(currentState => {
+				console.log(`Cached login form.`)
+				resolve(currentState)
+			})
+			.catch(err => {
+				reject(err)
+			})
+		}
+
+		resolve(response)
+	})
+	.catch(err => {
+		return reject(err)
+	})
 })
-.then(result => {
-	console.log(result)
+
+const addCustomer = (currentState, ...args) => new Promise((resolve, reject) => {
+	const [
+		username,
+		firstName,
+		lastName,
+		cache
+    ] = args
+
+	const path = endpoints.addCustomer
+
+	const headers = {
+		'Finicity-App-Token': currentState.accessToken.token,
+	}
+
+	var options = {
+		path,
+		headers,
+		method: 'POST'
+	}
+
+	const body = {
+		customer: {
+			username,
+			firstName,
+			lastName
+		}
+	}
+
+	const postData = toSafeXml(body)
+	// console.log(postData)
+
+	request(options, postData)
+	.then(response => {
+		if (!Reflect.has(response, 'id')) {
+			console.warn(`Code ${response.code}: ${response.message}`)
+			return
+		}
+
+		if (cache) {
+			const dataToSave = {
+				customers: {
+					[username]: response
+				}
+			}
+
+			return state.merge(dataToSave)
+			.then(currentState => {
+				console.log(`Cached new user ${username}.`)
+				resolve(currentState)
+			})
+			.catch(err => {
+				reject(err)
+			})
+		}
+
+		resolve(response)
+	})
+	.catch(err => {
+		return reject(err)
+	})
 })
-.catch(err => {
-	console.error(err)
+
+const getCustomers = (currentState, ...args) => new Promise((resolve, reject) => {
+	const [cache] = args
+
+	const path = endpoints.getCustomers
+
+	const headers = {
+		'Finicity-App-Token': currentState.accessToken.token,
+	}
+
+	var options = {
+		path,
+		headers,
+		method: 'GET'
+	}
+
+	const postData = null
+
+	request(options, postData)
+	.then(response => {
+		if (!Reflect.has(response, 'customers')) {
+			console.warn(`Code ${response.code}: ${response.message}`)
+			return
+		}
+
+		console.log(`Found ${response.found} customers.`)
+
+		if (cache) {
+			const dataToSave = {
+				customers: {}
+			}
+
+			response.customers.forEach(customer => {
+				dataToSave.customers[customer.username] = customer
+			})
+
+			return state.merge(dataToSave)
+			.then(currentState => {
+				console.log(`Cached new ${response.found} customers.`)
+				resolve(currentState)
+			})
+			.catch(err => {
+				reject(err)
+			})
+		}
+
+		resolve(response)
+	})
+	.catch(err => {
+		return reject(err)
+	})
 })
+
+const selectCachedInstitution = currentState => new Promise((resolve, reject) => {
+	const questionText = 'Select institution to access:'
+
+	const institutionsList = []
+
+	Reflect.ownKeys(currentState.institutions).forEach(institutionId => {
+		institutionsList.push(currentState.institutions[institutionId].name)
+	})
+
+	const question = new Question('institution', questionText, {
+		type: 'list',
+		choices: institutionsList
+	})
+
+	const prompt = new PromptList(question)
+
+	prompt.run()
+	.then(answer => {
+		Reflect.ownKeys(currentState.institutions).forEach(institutionId => {
+			const institution = currentState.institutions[institutionId]
+
+			if (institution.name === answer) {
+				resolve(institution)
+			}
+		})
+	})
+	.catch(function(err) {
+		return reject(err)
+	})
+})
+
+const selectCachedCustomer = currentState => new Promise((resolve, reject) => {
+	const questionText = 'Select customer:'
+
+	const customers = currentState.customers
+	const customerList = []
+
+	Reflect.ownKeys(customers).forEach(username => {
+		const customer = customers[username]
+		const customerString = `${username} (${customer.id})`
+		customerList.push(customerString)
+	})
+
+  const question = new Question('customer', questionText, {
+    type: 'list',
+    choices: customerList
+  })
+
+  const prompt = new PromptList(question)
+
+	prompt.run()
+	.then(answer => {
+		Reflect.ownKeys(customers).forEach(username => {
+			const customer = customers[username]
+			const customerString = `${customer.username} (${customer.id})`
+
+			if (answer === customerString) {
+				resolve(customer)
+			}
+		})
+	})
+	.catch(function(err) {
+		return reject(err)
+	})
+})
+
+const checkInsitutionHasLoginForm = institution => new Promise((resolve, reject) => {
+	if(!Reflect.has(institution, 'login')) {
+		const institutionName = chalk.yellow(institution.name)
+		console.warn(`The institution "${institutionName}" has no login form.`)
+		console.warn(`Fetching the login form for the institution "${institutionName}"...`)
+
+		const cache = true
+		return getLoginForm(state.current, institution.id, cache)
+		.then(currentState => {
+			resolve(institution)
+		})
+		.catch(reject)
+	}
+
+	if (loginFormExpired(institution.login.timestamp)) {
+		console.log('Your login form is older than 1 day.')
+		console.log('The login form is being re-fetched...')
+
+		const cache = true
+		return getLoginForm(state.current, institution.id, cache)
+		.then(currentState => {
+			resolve(institution)
+		})
+		.catch(reject)
+	}
+
+	resolve(institution)
+})
+
+const getCredentials = institution => new Promise((resolve, reject) => {
+	const questions = []
+
+	Reflect.ownKeys(institution.LoginForm).forEach(key=> {
+		const credentialName = institution.credentials[key]
+
+		const question = {
+			message: `${institution.name} ${credentialName}:`,
+			name: key
+	}
+
+	if (key === 'password' || key === 'pin') {
+	question.type = 'password'
+	}
+
+	questions.push(question)
+	})
+
+	enquirer.ask(questions).then(resolve).catch(reject)
+})
+
+const addAllAccounts = (currentState, props) => new Promise((resolve, reject) => {
+	const {institution, customer} = props
+
+	const path = endpoints.addAllAccounts
+
+	const headers = {
+		'Finicity-App-Token': currentState.accessToken.token,
+	}
+
+	var options = {
+		path,
+		headers,
+		method: 'POST'
+	}
+
+	// const body = {
+	// 	credentials: {
+	// 		username,
+	// 		firstName,
+	// 		lastName
+	// 	}
+	// }
+
+	console.log(institutionCode)
+	// console.log(currentState.institutions)
+
+	// const postData = toSafeXml(body)
+	// console.log(postData)
+
+	// request(options, postData)
+	// .then(response => {
+	// 	console.log(response)
+	// })
+	// .catch(err => {
+	// 	return reject(err)
+	// })
+})
+
+const controlFlow = {
+	getInstitutions: (searchText, start, limit, cache) => new Promise((resolve, reject) => {
+		state.load()
+		.then(checkStateToken)
+		.then(currentState => {
+			return getInstitutions(currentState, searchText, start, limit, cache)
+		})
+		.then(resolve)
+		.catch(reject)
+	}),
+
+	listCachedInstitutions: () => new Promise((resolve, reject) => {
+		state.load()
+		.then(currentState => {
+			const institutions = currentState.institutions
+			Reflect.ownKeys(institutions)
+			.forEach(key => {
+				const institution = institutions[key]
+				console.log(`${institution.id} - ${institution.name}`)
+			})
+		})
+	}),
+
+	getLoginForm: (...args) => new Promise((resolve, reject) => {
+		const [id, cache] = args
+
+		state.load()
+		.then(checkStateToken)
+		.then(currentState => {
+			return getLoginForm(currentState, id, cache)
+		})
+		.then(resolve)
+		.catch(reject)
+	}),
+
+	addCustomer: (...args) => new Promise((resolve, reject) => {
+		state.load()
+		.then(checkStateToken)
+		.then(currentState => {
+			return addCustomer(currentState, ...args)
+		})
+		.then(resolve)
+		.catch(reject)
+	}),
+
+	getCustomers: (...args) => new Promise((resolve, reject) => {
+		state.load()
+		.then(checkStateToken)
+		.then(currentState => {
+			return getCustomers(currentState, ...args)
+		})
+		.then(resolve)
+		.catch(reject)
+	}),
+
+	addAllAccounts: (...args) => new Promise((resolve, reject) => {
+		state.load()
+		.then(checkStateToken)
+		.then(currentState => {
+			return addAllAccounts(currentState, ...args)
+		})
+		.then(resolve)
+		.catch(reject)
+	}),
+
+	default: (...args) => new Promise((resolve, reject) => {
+		state.load()
+		.then(checkStateToken)
+		.then(currentState => new Promise((resolve, reject) => {
+				selectCachedInstitution(currentState)
+				.then(checkInsitutionHasLoginForm)
+				.then(institution => {
+					selectCachedCustomer(currentState)
+					.then(customer => {
+						resolve({institution, customer})
+					})
+					.catch(reject)
+				.catch(reject)
+			}).catch(reject)
+		}))
+		// .then(addAllAccounts)
+		.then(result => {
+			console.log('final result:', result)
+		})
+		// .then(resolve)
+		.catch(reject)
+	})
+}
+
+let commandGiven;
+
+commander
+.version(packageJson.version)
+.arguments('<command> [options...]')
+.action((command, options) => {
+	if (command.toUpperCase() === "DEBUG") {
+		debug = true
+		command = options.shift()
+	}
+
+	if (debug) {
+		console.log(command)
+		console.dir(options)
+	}
+
+	if (Reflect.has(controlFlow, command)) {
+		commandGiven = command
+		return controlFlow[command](...options)
+			.then(result => {
+				console.log(result)
+			})
+			.catch(err => {
+				console.error(err)
+			})
+	}
+})
+.parse(process.argv)
+
+if (!commandGiven) {
+	controlFlow.default()
+		.then(result => {
+			console.log(result)
+		})
+		.catch(err => {
+			console.error(err)
+		})
+}
