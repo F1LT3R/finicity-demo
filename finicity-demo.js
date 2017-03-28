@@ -590,32 +590,59 @@ const checkInsitutionHasLoginForm = institution => new Promise((resolve, reject)
 
 const getCredentials = institution => new Promise((resolve, reject) => {
 	const questions = []
+	const filledCredentials = []
 
-	Reflect.ownKeys(institution.LoginForm).forEach(key=> {
-		const credentialName = institution.credentials[key]
+	institution.login.loginForm.forEach(credential => {
+		// console.log(credential)
 
 		const question = {
-			message: `${institution.name} ${credentialName}:`,
-			name: key
-	}
+			message: `${institution.name} ${credential.description}:`,
+			name: credential.id
+		}
 
-	if (key === 'password' || key === 'pin') {
-	question.type = 'password'
-	}
+		if (credential.mask === 'true') {
+			question.type = 'password'
+		}
 
-	questions.push(question)
+		questions.push(question)
 	})
 
-	enquirer.ask(questions).then(resolve).catch(reject)
+
+	// NEVER CACHE THESE ANSWERS!
+	enquirer.ask(questions)
+	.then(answers => {
+		// console.log(answers)
+
+		Reflect.ownKeys(answers).forEach(credentialId => {
+			const answer = answers[credentialId]
+
+			institution.login.loginForm.forEach(loginCredential => {
+				if (loginCredential.id === credentialId) {
+					const credentialAnswer = deepExtend(loginCredential, {
+						value: answer
+					})
+
+					filledCredentials.push(credentialAnswer)
+				}
+			})
+		})
+
+		resolve(filledCredentials)
+	})
+	.catch(reject)
 })
 
-const addAllAccounts = (currentState, props) => new Promise((resolve, reject) => {
-	const {institution, customer} = props
+const addAllAccounts = (customer, insitution, credentials) => new Promise((resolve, reject) => {
+	// console.log(credentials)
 
 	const path = endpoints.addAllAccounts
+		.replace('{customerId}', customer.id)
+		.replace('{institutionId}', insitution.id);
+
+	console.log(path)
 
 	const headers = {
-		'Finicity-App-Token': currentState.accessToken.token,
+		'Finicity-App-Token': state.current.accessToken.token,
 	}
 
 	var options = {
@@ -624,27 +651,29 @@ const addAllAccounts = (currentState, props) => new Promise((resolve, reject) =>
 		method: 'POST'
 	}
 
-	// const body = {
-	// 	credentials: {
-	// 		username,
-	// 		firstName,
-	// 		lastName
-	// 	}
-	// }
+	const body = {
+		credentials: []
+	}
 
-	console.log(institutionCode)
-	// console.log(currentState.institutions)
+	credentials.forEach(credential => {
+		const {id, name, value} = credential
+		console.log(id, name, value)
 
-	// const postData = toSafeXml(body)
-	// console.log(postData)
+		body.credentials.push({
+			loginField: {id, name, value}
+		})
+	})
 
-	// request(options, postData)
-	// .then(response => {
-	// 	console.log(response)
-	// })
-	// .catch(err => {
-	// 	return reject(err)
-	// })
+	const postData = toSafeXml(body)
+	console.log(postData)
+
+	request(options, postData)
+	.then(response => {
+		console.log(response)
+	})
+	.catch(err => {
+		return reject(err)
+	})
 })
 
 const controlFlow = {
@@ -727,7 +756,19 @@ const controlFlow = {
 			})
 			.catch(reject)
 		}))
-		// .then(addAllAccounts)
+		.then(props => new Promise((resolve, reject) => {
+			const {institution, customer} = props
+			getCredentials(institution)
+			.then(answers => {
+				// console.log(answers)
+
+				addAllAccounts(customer, institution, answers)
+				.then(results => {
+					console.log(results)
+				})
+			})
+			.catch(reject)
+		}))
 		.then(result => {
 			console.log('final result:', result)
 		})
