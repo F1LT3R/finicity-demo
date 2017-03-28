@@ -8,7 +8,7 @@ const endpoints = {
 	addCustomer: '/aggregation/v1/customers/active',
 	getCustomers: '/aggregation/v1/customers',
 	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall',
-	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall/mfa',
+	addAllAccountsMfa: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall/mfa',
 }
 
 const errorCodes = {
