@@ -676,7 +676,6 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 
 	const postData = toSafeXml(body)
 	console.dir(postData)
-	process.exit()
 
 	request(options, postData)
 	.then(response => {
