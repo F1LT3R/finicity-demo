@@ -664,7 +664,7 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 	}
 
 	credentials.forEach(credential => {
-		const {id, description: name, value} = credential
+		const {id, name, value} = credential
 		console.log(id, name, value)
 
 		body.accounts.credentials.push({
