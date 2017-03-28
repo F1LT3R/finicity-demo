@@ -33,6 +33,7 @@ const html = require('html')
 const Enquirer = require('enquirer')
 const Question = require('prompt-question')
 const PromptList = require('prompt-list')
+const Table = require('cli-table')
 
 const packageJson = require('./package.json')
 
@@ -120,9 +121,7 @@ const loginFormExpired = cachedTimestamp => {
 // Makes POST/GET HTTPS Request and returns JavaScript Object
 const request = (options, postData) => new Promise((resolve, reject) => {
 	console.log()
-	console.log(chalk.blue('HOST_PATH'))
-	console.log(chalk.blue('---------'))
-	console.log(chalk.blue(host + options.path))
+	console.log(chalk.blue(`https://${host}${options.path}`))
 
 	let responseBody = ''
 
@@ -262,7 +261,7 @@ const authentication = () => new Promise((resolve, reject) => {
 
 const checkStateToken = currentState => new Promise(resolve => {
 	if (!Reflect.has(currentState, 'accessToken')) {
-		console.log('/o access token cached')
+		console.log('No access token cached')
 		resolve(authentication())
 	}
 
@@ -643,7 +642,6 @@ const getMfaAnswers = mfaQuestions => new Promise((resolve, reject) => {
 			const choiceList = []
 
 			mfaQuestion.choices.forEach(mfaChoice => {
-				// console.log(mfaChoice)
 				choiceList.push(mfaChoice.choice)
 			})
 
@@ -659,6 +657,50 @@ const getMfaAnswers = mfaQuestions => new Promise((resolve, reject) => {
 		resolve(answers)
 	})
 	.catch(reject)
+})
+
+const formatCurrency = (amount, type) => {
+	const value = parseFloat(amount, 10)
+
+	if (Number.isNaN(value)) {
+		return amount || ''
+	}
+
+	let color
+	const positive = value >= 0
+	if (type === 'transaction') {
+		color = positive ? 'blue' : 'green'
+	} else if (type === 'balance') {
+		color = positive ? 'green' : 'red'
+	}
+
+	const locale = value.toLocaleString('en-US', {style: 'currency', currency: 'USD'})
+
+	return `${chalk[color](locale)}`
+}
+
+const displayAccounts = response => new Promise(resolve => {
+	const accounts = response.body.accounts
+
+	const table = new Table({
+		style: {head: ['grey']},
+		head: ['Name', 'Number', 'Balance', 'Type'],
+		colWidths: [28, 16, 16, 12]
+	})
+
+	accounts.forEach(account => {
+		table.push([
+			account.name,
+			account.number,
+			formatCurrency(account.balance, 'balance'),
+			account.type
+		])
+	})
+
+	const output = table.toString()
+	console.log(output)
+
+	resolve(response)
 })
 
 const getAllAccountsMfa = props => new Promise((resolve, reject) => {
@@ -795,7 +837,6 @@ const addAllAccounts = (customer, institution, credentials) => new Promise((reso
 			.catch(reject)
 		}
 
-		console.dir(response.body)
 		resolve(response)
 	})
 	.catch(err => {
@@ -811,7 +852,10 @@ const controlFlow = {
 			return getInstitutions(currentState, searchText, start, limit, cache)
 		})
 		.then(response => {
-			console.dir(response)
+			if (response.statusCode === 200) {
+				console.dir(response.body.institutions)
+			}
+			resolve()
 		})
 		.catch(reject)
 	}),
@@ -899,9 +943,9 @@ const controlFlow = {
 		}))
 		.then(response => {
 			if (response.statusCode === 200) {
-				console.dir(response.body.accounts)
+				displayAccounts(response)
 			}
-			resolve(response)
+			resolve()
 		})
 		.catch(reject)
 	})
@@ -927,7 +971,9 @@ commander
 		commandGiven = command
 		return controlFlow[command](...options)
 			.then(result => {
-				console.log(result)
+				if (result) {
+					console.log(result)
+				}
 			})
 			.catch(err => {
 				console.error(err)
@@ -939,7 +985,9 @@ commander
 if (!commandGiven) {
 	controlFlow.default()
 		.then(result => {
-			console.log(result)
+			if (result) {
+				console.log(result)
+			}
 		})
 		.catch(err => {
 			console.error(err)
