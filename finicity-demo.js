@@ -1,3 +1,5 @@
+let debug = true
+
 const endpoints = {
 	authentication: '/aggregation/v2/partners/authentication',
 	getInstitutions: '/aggregation/v1/institutions',
@@ -6,6 +8,7 @@ const endpoints = {
 	addCustomer: '/aggregation/v1/customers/active',
 	getCustomers: '/aggregation/v1/customers',
 	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall',
+	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall/mfa',
 }
 
 const errorCodes = {
@@ -41,7 +44,6 @@ const PromptPassword = require('prompt-password')
 
 jsonfile.spaces = 4
 
-let debug = false
 
 const enquirer = new Enquirer()
 enquirer.register('list', require('prompt-list'))
@@ -680,6 +682,10 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 	request(options, postData)
 	.then(response => {
 		console.log(response)
+
+		if (Reflect.has(reponse, 'questions')) {
+			//
+		}
 	})
 	.catch(err => {
 		return reject(err)
