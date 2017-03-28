@@ -716,16 +716,16 @@ const controlFlow = {
 		state.load()
 		.then(checkStateToken)
 		.then(currentState => new Promise((resolve, reject) => {
-				selectCachedInstitution(currentState)
-				.then(checkInsitutionHasLoginForm)
-				.then(institution => {
-					selectCachedCustomer(currentState)
-					.then(customer => {
-						resolve({institution, customer})
-					})
-					.catch(reject)
+			selectCachedInstitution(currentState)
+			.then(checkInsitutionHasLoginForm)
+			.then(institution => {
+				selectCachedCustomer(currentState)
+				.then(customer => {
+					resolve({institution, customer})
+				})
 				.catch(reject)
-			}).catch(reject)
+			})
+			.catch(reject)
 		}))
 		// .then(addAllAccounts)
 		.then(result => {
