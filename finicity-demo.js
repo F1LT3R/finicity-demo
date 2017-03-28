@@ -1,29 +1,24 @@
-let debug = true
+let debug = false
 
 const endpoints = {
 	authentication: '/aggregation/v2/partners/authentication',
 	getInstitutions: '/aggregation/v1/institutions',
 	getLoginForm: '/aggregation/v1/institutions/{id}/loginForm',
-	// addCustomer: '/aggregation/v1/customers/testing',
+	addCustomerTesting: '/aggregation/v1/customers/testing',
 	addCustomer: '/aggregation/v1/customers/active',
 	getCustomers: '/aggregation/v1/customers',
 	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall',
 	addAllAccountsMfa: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall/mfa',
 }
 
-const errorCodes = {
-	aggregation: {
-		103: 'Invalid Credentials'
-	}
-}
+const undocumentedErrorCode = 'UN-DOCUMENTED ERROR CODE!'
 
-const institutionsToCache = [
-	'TD Bank',
-	'Vanguard',
-	'USAA',
-	'HealthEquity',
-	'Capitol One'
-]
+const errorcodes = {
+	103: 'Invalid Credentials',
+	106: undocumentedErrorCode,
+	108: 'User Action Required',
+	187: 'Missing or Incorrect MFA Answer'
+}
 
 let host = 'http://127.0.0.1:3000'
 
@@ -32,35 +27,26 @@ const o2x = require('object-to-xml')
 const jsonfile = require('jsonfile')
 const Promise = require('bluebird')
 const deepExtend = require('deep-extend')
-const queryString = require('query-string')
 const commander = require('commander')
 const chalk = require('chalk')
 const html = require('html')
-const packageJson = require('./package.json')
 const Enquirer = require('enquirer')
 const Question = require('prompt-question')
 const PromptList = require('prompt-list')
-const PromptPassword = require('prompt-password')
+
+const packageJson = require('./package.json')
 
 jsonfile.spaces = 4
 
-
-const enquirer = new Enquirer()
-enquirer.register('list', require('prompt-list'))
-enquirer.register('password', require('prompt-password'))
-
-
-
 const POSTCHECK = process.argv[2] === 'POSTCHECK'
 
-const finicity_app_key = process.env.finicity_app_key
-const finicity_partner_id = process.env.finicity_partner_id
-const finicity_partner_secret = process.env.finicity_partner_secret
+const finicityAppKey = process.env.finicity_app_key
+const finicityPartnerId = process.env.finicity_partner_id
+const finicityPartnerSecret = process.env.finicity_partner_secret
 
-if (!finicity_app_key) {
-	console.error('Could not find your encironment variable "$finicity_app_key"')
-	console.log('Have you sourced your "~/.finicity_keys" file?')
-	process.exit(1)
+if (!finicityAppKey) {
+	console.error('Could not find your encironment variable "$finicityAppKey"')
+	throw new Error('Have you sourced your "~/.finicity_keys" file?')
 }
 
 if (!POSTCHECK) {
@@ -68,46 +54,6 @@ if (!POSTCHECK) {
 }
 
 const stateFile = 'WARNING_BANK_ACCESS_KEYS.json'
-
-const has = (obj, ...lookups) => {
-	let allTrue = true
-
-	const step = (remainingSteps, pointer, type) => {
-		const nextStep = remainingSteps.shift()
-		const remainingStepCount = remainingSteps.length
-
-		if (nextStep === undefined && typeof pointer === type) {
-			return
-		}
-
-		if (remainingStepCount === 1 && !Reflect.has(pointer, nextStep)) {
-			allTrue = false
-			return
-		}
-
-		if (remainingStepCount === 0 && typeof pointer[nextStep] !== type) {
-			allTrue = false
-			return
-		} else {
-
-		}
-
-		pointer = pointer[nextStep]
-
-		if (remainingSteps.length >= 0) {
-			step(remainingSteps, pointer, type)
-		}
-	}
-
-	lookups.forEach(lookup => {
-		const parts = lookup.split(':')
-		const [type, chain, value] = parts
-		const steps = chain.split('.')
-		step(steps, obj, type)
-	})
-
-	return allTrue
-}
 
 const timeStamp = () => {
 	return Number(new Date())
@@ -128,7 +74,7 @@ const state = {
 	}),
 
 	save: () => new Promise((resolve, reject) => {
-		jsonfile.writeFile(stateFile, state.current, (err, res) => {
+		jsonfile.writeFile(stateFile, state.current, err => {
 			if (err) {
 				return reject(err)
 			}
@@ -144,14 +90,9 @@ const state = {
 				resolve(currentState)
 			})
 			.catch(err => {
-				resject(err)
+				reject(err)
 			})
-	}),
-
-	get: namespace => {},
-
-	set: (namespace, data) => {
-	}
+	})
 }
 
 const nintyMinutes = 1000 * 60 * 90
@@ -176,38 +117,87 @@ const loginFormExpired = cachedTimestamp => {
 	return false
 }
 
-
 // Makes POST/GET HTTPS Request and returns JavaScript Object
 const request = (options, postData) => new Promise((resolve, reject) => {
+	console.log()
+	console.log(chalk.blue('HOST_PATH'))
+	console.log(chalk.blue('---------'))
+	console.log(chalk.blue(host + options.path))
+
 	let responseBody = ''
 
 	const defaultHeaders = {
-		'Finicity-App-Key': finicity_app_key,
+		'Finicity-App-Key': finicityAppKey,
 		'Content-Type': 'application/xml',
-		'Accept': 'application/json'
+		Accept: 'application/json'
 	}
 
 	options.headers = deepExtend(defaultHeaders, options.headers)
 	options.host = host
 
 	if (debug) {
+		console.log()
+		console.log(chalk.green('OPTIONS'))
+		console.log(chalk.green('-------'))
 		console.log(chalk.green((JSON.stringify(options))))
-	} else {
-		console.log(chalk.green(options.host + options.path))
+
+		console.log()
+		console.log(chalk.yellow('POST_DATA'))
+		console.log(chalk.yellow('---------'))
+		console.log(chalk.yellow(html.prettyPrint(postData)))
 	}
 
 	const request = https.request(options, response => {
-		response.setEncoding('utf8');
+		response.setEncoding('utf8')
+
+		if (debug) {
+			console.log()
+			console.log('RESPONSE_HEADERS')
+			console.log('----------------')
+			console.dir(response.headers)
+
+			console.log()
+			console.log(chalk.yellow('STATUS_CODE'))
+			console.log(chalk.yellow('-----------'))
+			console.log(chalk.yellow(response.statusCode))
+		}
 
 		response.on('data', chunk => {
 			responseBody += chunk.toString()
 		})
 
 		response.on('end', () => {
+			if (debug) {
+				console.log()
+				console.log('RESPONSE_BODY')
+				console.log('-------------')
+				console.dir(responseBody)
+			}
+
 			try {
-				const data = JSON.parse(responseBody)
-				resolve(data)
+				const body = JSON.parse(responseBody)
+
+				if (Reflect.has(body, 'code') && Reflect.has(body, 'message')) {
+					console.log()
+					console.log(chalk.red('ERROR_CODE'))
+					console.log(chalk.red('-----------'))
+					console.log(chalk.red(body.code))
+					console.log(chalk.red(body.message))
+
+					if (Reflect.has(errorcodes, body.code)) {
+						console.log(chalk.red(errorcodes[body.code]))
+					}
+				}
+
+				resolve({
+					headers: response.headers,
+					statusCode: response.statusCode,
+					body
+				})
 			} catch (err) {
+				console.log()
+				console.log('RESPONSE_BODY_IN_ERROR(AS_HTML)')
+				console.log('-------------------------------')
 				console.log(chalk.red(html.prettyPrint(responseBody)))
 				return reject(err)
 			}
@@ -216,7 +206,6 @@ const request = (options, postData) => new Promise((resolve, reject) => {
 		response.on('error', err => {
 			reject(err)
 		})
-
 	})
 
 	if (postData) {
@@ -226,27 +215,11 @@ const request = (options, postData) => new Promise((resolve, reject) => {
 	request.end()
 })
 
-const checkStateToken = currentState => new Promise((resolve, reject) => {
-	if (!has(currentState, 'string:accessToken.token', 'number:accessToken.timestamp')) {
-		console.log('No access token cached')
-		resolve(authentication())
-	}
-
-	if (timestampExpired(currentState.accessToken.timestamp)) {
-		console.log('Your Finicity access token has expired.')
-		console.log('Reauthenticating...')
-		resolve(authentication())
-	}
-
-	console.log('Existing access token is still valid.')
-	return resolve(currentState)
-})
-
 // Finicity did not like my JSON requests for some reason, so I am sending
 // them as XML instead, for now.
 const toSafeXml = obj => {
 	// Fincitiy does not like newlines in the XML. Security meassure?
-	return o2x(obj).replace(/\n|\s/g, '')
+	return o2x(obj).replace(/\n/g, '')
 }
 
 const authentication = () => new Promise((resolve, reject) => {
@@ -258,8 +231,8 @@ const authentication = () => new Promise((resolve, reject) => {
 
 	const body = {
 		credentials: {
-			partnerId: finicity_partner_id,
-			partnerSecret: finicity_partner_secret
+			partnerId: finicityPartnerId,
+			partnerSecret: finicityPartnerSecret
 		}
 	}
 
@@ -269,7 +242,7 @@ const authentication = () => new Promise((resolve, reject) => {
 	.then(response => {
 		const dataToSave = {
 			accessToken: {
-				token: response.token,
+				token: response.body.token,
 				timestamp: timeStamp()
 			}
 		}
@@ -287,6 +260,22 @@ const authentication = () => new Promise((resolve, reject) => {
 	})
 })
 
+const checkStateToken = currentState => new Promise(resolve => {
+	if (!Reflect.has(currentState, 'accessToken')) {
+		console.log('/o access token cached')
+		resolve(authentication())
+	}
+
+	if (timestampExpired(currentState.accessToken.timestamp)) {
+		console.log('Your Finicity access token has expired.')
+		console.log('Reauthenticating...')
+		resolve(authentication())
+	}
+
+	console.log('Existing access token is still valid.')
+	return resolve(currentState)
+})
+
 const getInstitutions = (currentState, searchText, start, limit, cache) => new Promise((resolve, reject) => {
 	const search = searchText.replace(/\s/g, '+')
 	const query = `?search=${search}&start=${start}&limit=${limit}`
@@ -294,10 +283,10 @@ const getInstitutions = (currentState, searchText, start, limit, cache) => new P
 	const path = endpoints.getInstitutions + query
 
 	const headers = {
-		'Finicity-App-Token': currentState.accessToken.token,
+		'Finicity-App-Token': currentState.accessToken.token
 	}
 
-	var options = {
+	const options = {
 		path,
 		headers
 	}
@@ -306,25 +295,25 @@ const getInstitutions = (currentState, searchText, start, limit, cache) => new P
 
 	request(options, postData)
 	.then(response => {
-		if (response.institutions.length === 0) {
+		if (response.body.institutions.length === 0) {
 			console.log(`No insitutions found for search: "${searchText}".`)
 			return resolve(currentState)
 		}
 
-		console.log(`Found ${response.institutions.length} institutions for search: "${searchText}".`)
+		console.log(`Found ${chalk.yellow(response.body.institutions.length)} institutions for search: "${chalk.yellow(searchText)}".`)
 
-		if (cache.toUpperCase() === "TRUE") {
+		if (cache && cache.toUpperCase() === 'TRUE') {
 			const dataToSave = {
 				institutions: {}
 			}
 
-			response.institutions.forEach(institution => {
+			response.body.institutions.forEach(institution => {
 				dataToSave.institutions[institution.id] = institution
 			})
 
 			return state.merge(dataToSave)
 			.then(currentState => {
-				console.log(`Cached ${response.institutions.length} institutions.`)
+				console.log(`Cached ${response.body.institutions.length} institutions.`)
 				resolve(currentState)
 			})
 			.catch(err => {
@@ -343,10 +332,10 @@ const getLoginForm = (currentState, id, cache) => new Promise((resolve, reject) 
 	const path = endpoints.getLoginForm.replace('{id}', id)
 
 	const headers = {
-		'Finicity-App-Token': currentState.accessToken.token,
+		'Finicity-App-Token': currentState.accessToken.token
 	}
 
-	var options = {
+	const options = {
 		path,
 		headers
 	}
@@ -363,7 +352,7 @@ const getLoginForm = (currentState, id, cache) => new Promise((resolve, reject) 
 				institutions: {
 					[id]: {
 						login: {
-							loginForm: response.loginForm,
+							loginForm: response.body.loginForm,
 							timestamp: timeStamp()
 						}
 					}
@@ -398,10 +387,10 @@ const addCustomer = (currentState, ...args) => new Promise((resolve, reject) => 
 	const path = endpoints.addCustomer
 
 	const headers = {
-		'Finicity-App-Token': currentState.accessToken.token,
+		'Finicity-App-Token': currentState.accessToken.token
 	}
 
-	var options = {
+	const options = {
 		path,
 		headers,
 		method: 'POST'
@@ -416,19 +405,18 @@ const addCustomer = (currentState, ...args) => new Promise((resolve, reject) => 
 	}
 
 	const postData = toSafeXml(body)
-	// console.log(postData)
 
 	request(options, postData)
 	.then(response => {
 		if (!Reflect.has(response, 'id')) {
-			console.warn(`Code ${response.code}: ${response.message}`)
+			console.warn(`Code ${response.body.code}: ${response.body.message}`)
 			return
 		}
 
 		if (cache) {
 			const dataToSave = {
 				customers: {
-					[username]: response
+					[username]: response.body
 				}
 			}
 
@@ -455,10 +443,10 @@ const getCustomers = (currentState, ...args) => new Promise((resolve, reject) =>
 	const path = endpoints.getCustomers
 
 	const headers = {
-		'Finicity-App-Token': currentState.accessToken.token,
+		'Finicity-App-Token': currentState.accessToken.token
 	}
 
-	var options = {
+	const options = {
 		path,
 		headers,
 		method: 'GET'
@@ -468,25 +456,25 @@ const getCustomers = (currentState, ...args) => new Promise((resolve, reject) =>
 
 	request(options, postData)
 	.then(response => {
-		if (!Reflect.has(response, 'customers')) {
-			console.warn(`Code ${response.code}: ${response.message}`)
+		if (!Reflect.has(response.body, 'customers')) {
+			console.warn(`Code ${response.body.code}: ${response.body.message}`)
 			return
 		}
 
-		console.log(`Found ${response.found} customers.`)
+		console.log(`Found ${response.body.found} customers.`)
 
 		if (cache) {
 			const dataToSave = {
 				customers: {}
 			}
 
-			response.customers.forEach(customer => {
+			response.body.customers.forEach(customer => {
 				dataToSave.customers[customer.username] = customer
 			})
 
 			return state.merge(dataToSave)
 			.then(currentState => {
-				console.log(`Cached new ${response.found} customers.`)
+				console.log(`Cached new ${response.body.found} customers.`)
 				resolve(currentState)
 			})
 			.catch(err => {
@@ -527,7 +515,7 @@ const selectCachedInstitution = currentState => new Promise((resolve, reject) =>
 			}
 		})
 	})
-	.catch(function(err) {
+	.catch(err => {
 		return reject(err)
 	})
 })
@@ -544,12 +532,12 @@ const selectCachedCustomer = currentState => new Promise((resolve, reject) => {
 		customerList.push(customerString)
 	})
 
-  const question = new Question('customer', questionText, {
-    type: 'list',
-    choices: customerList
-  })
+	const question = new Question('customer', questionText, {
+		type: 'list',
+		choices: customerList
+	})
 
-  const prompt = new PromptList(question)
+	const prompt = new PromptList(question)
 
 	prompt.run()
 	.then(answer => {
@@ -562,20 +550,20 @@ const selectCachedCustomer = currentState => new Promise((resolve, reject) => {
 			}
 		})
 	})
-	.catch(function(err) {
+	.catch(err => {
 		return reject(err)
 	})
 })
 
 const checkInsitutionHasLoginForm = institution => new Promise((resolve, reject) => {
-	if(!Reflect.has(institution, 'login')) {
+	if (!Reflect.has(institution, 'login')) {
 		const institutionName = chalk.yellow(institution.name)
 		console.warn(`The institution "${institutionName}" has no login form.`)
 		console.warn(`Fetching the login form for the institution "${institutionName}"...`)
 
 		const cache = true
 		return getLoginForm(state.current, institution.id, cache)
-		.then(currentState => {
+		.then(() => {
 			resolve(institution)
 		})
 		.catch(reject)
@@ -587,7 +575,7 @@ const checkInsitutionHasLoginForm = institution => new Promise((resolve, reject)
 
 		const cache = true
 		return getLoginForm(state.current, institution.id, cache)
-		.then(currentState => {
+		.then(() => {
 			resolve(institution)
 		})
 		.catch(reject)
@@ -601,8 +589,6 @@ const getCredentials = institution => new Promise((resolve, reject) => {
 	const filledCredentials = []
 
 	institution.login.loginForm.forEach(credential => {
-		// console.log(credential)
-
 		const question = {
 			message: `${institution.name} ${credential.description}:`,
 			name: credential.id
@@ -615,12 +601,13 @@ const getCredentials = institution => new Promise((resolve, reject) => {
 		questions.push(question)
 	})
 
+	const enquirer = new Enquirer()
+	enquirer.register('list', require('prompt-list'))
+	enquirer.register('password', require('prompt-password'))
 
 	// NEVER CACHE THESE ANSWERS!
 	enquirer.ask(questions)
 	.then(answers => {
-		// console.log(answers)
-
 		Reflect.ownKeys(answers).forEach(credentialId => {
 			const answer = answers[credentialId]
 
@@ -640,24 +627,135 @@ const getCredentials = institution => new Promise((resolve, reject) => {
 	.catch(reject)
 })
 
-const addAllAccounts = (customer, insitution, credentials) => new Promise((resolve, reject) => {
-	// console.log(credentials)
+const getMfaAnswers = mfaQuestions => new Promise((resolve, reject) => {
+	const cliQuestions = []
 
-	const path = endpoints.addAllAccounts
+	const enquirer = new Enquirer()
+	enquirer.register('list', require('prompt-list'))
+
+	mfaQuestions.forEach(mfaQuestion => {
+		const question = {
+			message: mfaQuestion.text,
+			name: mfaQuestion.text
+		}
+
+		if (Reflect.has(mfaQuestion, 'choices')) {
+			const choiceList = []
+
+			mfaQuestion.choices.forEach(mfaChoice => {
+				// console.log(mfaChoice)
+				choiceList.push(mfaChoice.choice)
+			})
+
+			question.type = 'list'
+			question.choices = choiceList
+		}
+
+		cliQuestions.push(question)
+	})
+
+	enquirer.ask(cliQuestions)
+	.then(answers => {
+		resolve(answers)
+	})
+	.catch(reject)
+})
+
+const getAllAccountsMfa = props => new Promise((resolve, reject) => {
+	const {customer, institution, mfaSession, mfaQuestions, credentialBody} = props
+
+	const path = endpoints.addAllAccountsMfa
 		.replace('{customerId}', customer.id)
-		.replace('{institutionId}', insitution.id);
-
-	console.log(path)
+		.replace('{institutionId}', institution.id)
 
 	const headers = {
-		'Finicity-App-Token': state.current.accessToken.token,
+		'MFA-Session': mfaSession,
+		'Finicity-App-Token': state.current.accessToken.token
 	}
 
-	var options = {
-		path,
-		headers,
-		method: 'POST'
+	const options = {path, headers, method: 'POST'}
+
+	const mfaBody = {
+		accounts: {
+			mfaChallenges: {
+				questions: {
+					question: []
+				}
+			}
+		}
 	}
+
+	let body
+
+	if (credentialBody) {
+		body = deepExtend(credentialBody, mfaBody)
+	} else {
+		body = mfaBody
+	}
+
+	getMfaAnswers(mfaQuestions)
+	.then(answers => {
+		Reflect.ownKeys(answers).forEach((mfaText, idx) => {
+			const mfaQuestion = mfaQuestions[idx]
+
+			const mfaAnswer = answers[mfaText]
+
+			if (Reflect.has(mfaQuestion, 'choices')) {
+				body.accounts.mfaChallenges.questions.question.push({
+					text: mfaText,
+					choices: mfaQuestion.choices,
+					answer: mfaQuestions[idx].choices.find(mfaChoice => {
+						return mfaChoice.choice === mfaAnswer
+					}).value
+				})
+			} else {
+				body.accounts.mfaChallenges.questions.question.push({
+					text: mfaText,
+					answer: mfaAnswer
+				})
+			}
+		})
+
+		const postData = toSafeXml(body)
+
+		request(options, postData)
+		.then(response => {
+			if (Reflect.has(response.body, 'questions') &&
+				Reflect.has(response.headers, 'mfa-session')
+			) {
+				const mfaSession = response.headers['mfa-session']
+				const mfaQuestions = response.body.questions
+
+				return getAllAccountsMfa({
+					customer,
+					institution,
+					mfaSession,
+					mfaQuestions,
+					credentialBody
+				})
+				.then(resolve)
+				.catch(reject)
+			}
+
+			resolve(response)
+		})
+		.catch(err => {
+			return reject(err)
+		})
+	})
+	.catch(reject)
+})
+
+const addAllAccounts = (customer, institution, credentials) => new Promise((resolve, reject) => {
+	const path = endpoints.addAllAccounts
+		.replace('{customerId}', customer.id)
+		.replace('{institutionId}', institution.id)
+
+	const headers = {
+		'Finicity-App-Token': state.current.accessToken.token
+	}
+
+	const options = {path, headers, method: 'POST'}
 
 	const body = {
 		accounts: {
@@ -669,23 +767,36 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 
 	credentials.forEach(credential => {
 		const {id, name, value} = credential
-		console.log(id, name, value)
-
 		body.accounts.credentials.loginField.push({id, name, value})
 	})
 
-	console.log(body)
-
 	const postData = toSafeXml(body)
-	console.dir(postData)
 
 	request(options, postData)
 	.then(response => {
-		console.log(response)
+		if (Reflect.has(response.body, 'questions') &&
+			Reflect.has(response.headers, 'mfa-session')
+		) {
+			const mfaSession = response.headers['mfa-session']
+			const mfaQuestions = response.body.questions
 
-		if (Reflect.has(reponse, 'questions')) {
-			//
+			return getAllAccountsMfa({
+				customer,
+				institution,
+				mfaSession,
+				mfaQuestions,
+				credentialBody: body
+			})
+			.then(response => {
+				const accounts = response.body.accounts
+				console.log(chalk.green(`Found ${chalk.yellow(accounts.length)} accounts at ${chalk.yellow(institution.name)}`))
+				resolve(response)
+			})
+			.catch(reject)
 		}
+
+		console.dir(response.body)
+		resolve(response)
 	})
 	.catch(err => {
 		return reject(err)
@@ -699,7 +810,9 @@ const controlFlow = {
 		.then(currentState => {
 			return getInstitutions(currentState, searchText, start, limit, cache)
 		})
-		.then(resolve)
+		.then(response => {
+			console.dir(response)
+		})
 		.catch(reject)
 	}),
 
@@ -713,6 +826,7 @@ const controlFlow = {
 				console.log(`${institution.id} - ${institution.name}`)
 			})
 		})
+		.catch(reject)
 	}),
 
 	getLoginForm: (...args) => new Promise((resolve, reject) => {
@@ -757,7 +871,7 @@ const controlFlow = {
 		.catch(reject)
 	}),
 
-	default: (...args) => new Promise((resolve, reject) => {
+	default: () => new Promise((resolve, reject) => {
 		state.load()
 		.then(checkStateToken)
 		.then(currentState => new Promise((resolve, reject) => {
@@ -776,30 +890,30 @@ const controlFlow = {
 			const {institution, customer} = props
 			getCredentials(institution)
 			.then(answers => {
-				// console.log(answers)
-
 				addAllAccounts(customer, institution, answers)
-				.then(results => {
-					console.log(results)
+				.then(response => {
+					resolve(response)
 				})
 			})
 			.catch(reject)
 		}))
-		.then(result => {
-			console.log('final result:', result)
+		.then(response => {
+			if (response.statusCode === 200) {
+				console.dir(response.body.accounts)
+			}
+			resolve(response)
 		})
-		// .then(resolve)
 		.catch(reject)
 	})
 }
 
-let commandGiven;
+let commandGiven
 
 commander
 .version(packageJson.version)
 .arguments('<command> [options...]')
 .action((command, options) => {
-	if (command.toUpperCase() === "DEBUG") {
+	if (command.toUpperCase() === 'DEBUG') {
 		debug = true
 		command = options.shift()
 	}
