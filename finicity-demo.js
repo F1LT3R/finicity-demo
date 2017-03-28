@@ -652,14 +652,16 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 	}
 
 	const body = {
-		credentials: []
+		accounts: {
+			credentials: []
+		}
 	}
 
 	credentials.forEach(credential => {
 		const {id, name, value} = credential
 		console.log(id, name, value)
 
-		body.credentials.push({
+		body.accounts.credentials.push({
 			loginField: {id, name, value}
 		})
 	})
