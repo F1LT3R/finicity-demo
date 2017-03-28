@@ -8,6 +8,12 @@ const endpoints = {
 	addAllAccounts: '/aggregation/v1/customers/{customerId}/institutions/{institutionId}/accounts/addall',
 }
 
+const errorCodes = {
+	aggregation: {
+		103: 'Invalid Credentials'
+	}
+}
+
 const institutionsToCache = [
 	'TD Bank',
 	'Vanguard',
@@ -658,7 +664,7 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 	}
 
 	credentials.forEach(credential => {
-		const {id, name, value} = credential
+		const {id, description: name, value} = credential
 		console.log(id, name, value)
 
 		body.accounts.credentials.push({
