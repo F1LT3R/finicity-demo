@@ -659,7 +659,9 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 
 	const body = {
 		accounts: {
-			credentials: []
+			credentials: {
+				loginField: []
+			}
 		}
 	}
 
@@ -667,13 +669,14 @@ const addAllAccounts = (customer, insitution, credentials) => new Promise((resol
 		const {id, name, value} = credential
 		console.log(id, name, value)
 
-		body.accounts.credentials.push({
-			loginField: {id, name, value}
-		})
+		body.accounts.credentials.loginField.push({id, name, value})
 	})
 
+	console.log(body)
+
 	const postData = toSafeXml(body)
-	console.log(postData)
+	console.dir(postData)
+	process.exit()
 
 	request(options, postData)
 	.then(response => {
